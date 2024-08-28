@@ -5,23 +5,15 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
-
+#include <sys/ioctl.h>
+#include <linux/loop.h>
 
 const int squashfs_magic = 0x73717368;
 
-
+int mkdirp(const char *path);
 void rrm(int src);
-
 char *find_squasfs();
-
-// create dir if it does not exist
-int mkdirp(const char *path) {
-    struct stat st;
-    if (stat(path, &st) == 0) {
-        return 0;
-    }
-    return mkdir(path, 0755);
-}
+int setup_loop(const char *file, int n);
 
 int main(int argc, char *argv[]) {
     // First things first, we need a device tree
@@ -69,7 +61,13 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "No squashfs filesystem found\n");
         return 1;
     }
-    if (mount(squashfs, "/newroot", "squashfs", MS_RDONLY | MS_I_VERSION, NULL) != 0) {
+
+    // setup a loop device and attach the squashfs filesystem to it
+    if (setup_loop(squashfs, 0) == -1) {
+        return 1;
+    }
+
+    if (mount("/dev/loop0", "/newroot", "squashfs", MS_RDONLY | MS_I_VERSION, NULL) != 0) {
         perror("mount squashfs to new root");
         return 1;
     }
@@ -184,4 +182,40 @@ char *find_squasfs() {
         }
     }
     return NULL;
+}
+
+// create dir if it does not exist
+int mkdirp(const char *path) {
+    struct stat st;
+    if (stat(path, &st) == 0) {
+        return 0;
+    }
+    return mkdir(path, 0755);
+}
+
+// setup a loop device and attach a file to it
+int setup_loop(const char *file, int n) {
+    int fd = open("/dev/loop-control", O_RDWR);
+    if (fd == -1) {
+        perror("open /dev/loop-control");
+        return -1;
+    }
+    int loop = ioctl(fd, LOOP_CTL_ADD, n);
+    if (loop == -1) {
+        perror("ioctl LOOP_CTL_ADD");
+        return -1;
+    }
+    close(fd);
+    char loop_device[20];
+    sprintf(loop_device, "/dev/loop%d", n);
+    fd = open(loop_device, O_RDWR);
+    if (fd == -1) {
+        perror("open loop device");
+        return -1;
+    }
+    if (ioctl(fd, LOOP_SET_FD, file) == -1) {
+        perror("ioctl LOOP_SET_FD");
+        return -1;
+    }
+    return fd;
 }
