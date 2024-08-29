@@ -18,7 +18,7 @@ int setup_loop(const char *file, int n);
 
 int main(int argc, char *argv[]) {
     // First things first, we need a device tree
-    if (mount("none", "/dev", "tmpdevfs", 0, NULL) != 0) {
+    if (mount("none", "/dev", "devtmpfs", 0, NULL) != 0) {
         perror("mount /dev");
         return 1;
     }
