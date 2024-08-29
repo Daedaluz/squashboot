@@ -9,6 +9,7 @@
 #include <linux/loop.h>
 #include <malloc.h>
 #include <errno.h>
+#include <signal.h>
 
 const int squashfs_magic = 0x73717368;
 
@@ -18,18 +19,26 @@ void rrm(int src);
 
 char *find_squasfs();
 
-void setup_loop(const char *file, int n);
+int setup_loop(const char *file);
+
+void handler (int sig) {
+    printf("Caught signal %d\n", sig);
+    fflush(stdout);
+}
+
 
 int main(int argc, char *argv[]) {
     // First things first, we need a device tree
     if (mount("devtmpfs", "/dev", "devtmpfs", 0, NULL) != 0) {
-        perror("mount /dev");
+        printf("mount /dev: %s\n", strerror(errno));
+        fflush(stdout);
         return 1;
     }
     // Setup logging
-    int fd = open("/dev/kmsg", O_WRONLY | O_NOCTTY);
+    int fd = open("/dev/kmsg", O_WRONLY | O_NOCTTY| O_CLOEXEC);
     if (fd == -1) {
-        perror("open /dev/kmsg");
+        printf("open /dev/kmsg: %s\n", strerror(errno));
+        fflush(stdout);
         return 1;
     }
     // save stdout and stderr
@@ -41,28 +50,34 @@ int main(int argc, char *argv[]) {
     close(fd);
 
     printf("Mounting pseudo filesystems\n");
+    fflush(stdout);
 
     // create /dev/pts
     if (mkdirp("/dev/pts") == -1) {
-        perror("mkdir /dev/pts");
+        printf("mkdir /dev/pts: %s\n", strerror(errno));
+        fflush(stdout);
         return 1;
     }
 
     // mount pseudo filesystems
     if (mount("pts", "/dev/pts", "devpts", 0, NULL) != 0) {
-        perror("mount /dev/pts");
+        printf("mount /dev/pts: %s\n", strerror(errno));
+        fflush(stdout);
         return 1;
     }
     if (mount("proc", "/proc", "proc", 0, NULL) != 0) {
-        perror("mount /proc");
+        printf("mount /proc: %s\n", strerror(errno));
+        fflush(stdout);
         return 1;
     }
     if (mount("sysfs", "/sys", "sysfs", 0, NULL) != 0) {
-        perror("mount /sys");
+        printf("mount /sys: %s\n", strerror(errno));
+        fflush(stdout);
         return 1;
     }
 
     printf("Locating squashfs rootfs\n");
+    fflush(stdout);
 
     // find the squashfs filesystem and mount it
     char *squashfs = find_squasfs();
@@ -72,61 +87,78 @@ int main(int argc, char *argv[]) {
     }
 
     printf("Found squashfs at %s\n", squashfs);
+    fflush(stdout);
     printf("Attaching %s to /dev/loop0\n", squashfs);
+    fflush(stdout);
     // setup a loop device and attach the squashfs filesystem to it
-    if (setup_loop(squashfs, 0) == -1) {
-        return 1;
-    }
+    int dev = setup_loop(squashfs);
     free(squashfs);
-
-    printf("Mounting /dev/loop0 to /newroot\n");
-    if (mount("/dev/loop0", "/newroot", "squashfs", MS_RDONLY | MS_I_VERSION, NULL) != 0) {
-        perror("mount squashfs to new root");
+    if (dev == -1) {
         return 1;
     }
 
-    printf("Moving pseudo filesystems to new root");
+    char loopdev[20];
+    snprintf(loopdev, 20, "/dev/loop%d", dev);
+
+    printf("Mounting %s to /newroot\n", loopdev);
+    fflush(stdout);
+    if (mount(loopdev, "/newroot", "squashfs", MS_RDONLY | MS_I_VERSION, NULL) != 0) {
+        printf("mount %s: %s", loopdev, strerror(errno));
+        return 1;
+    }
+
+    printf("Moving pseudo filesystems to new root\n");
+    fflush(stdout);
     // move the pseudo filesystems to the new root
     if (mount("/dev", "/newroot/dev", NULL, MS_MOVE, NULL) != 0) {
-        perror("move mount /dev");
+        printf("move mount /dev: %s", strerror(errno));
+        fflush(stdout);
         return 1;
     }
     if (mount("/proc", "/newroot/proc", NULL, MS_MOVE, NULL) != 0) {
-        perror("move mount /dev");
+        printf("move mount /proc: %s", strerror(errno));
+        fflush(stdout);
         return 1;
     }
     if (mount("/sys", "/newroot/sys", NULL, MS_MOVE, NULL) != 0) {
-        perror("move mount /dev");
+        printf("move mount /sys: %s", strerror(errno));
+        fflush(stdout);
         return 1;
     }
 
     // chroot to the new root while retaining a reference to the old root
     // so that we can delete the remnants of the old root and free up RAM
     printf("Entering new root\n");
+    fflush(stdout);
     if (chdir("/newroot") == -1) {
-        perror("chdir /newroot");
+        printf("chdir /newroot error: %s\n", strerror(errno));
         return 1;
     }
-    int parent = open("/", O_DIRECTORY | O_RDWR);
+    int parent = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (parent == -1) {
-        perror("open /");
+        printf("open / error: %s\n", strerror(errno));
+        fflush(stdout);
         return 1;
     }
 
     if (chroot(".") == -1) {
-        perror("chroot");
+        printf("chroot . error: %s\n", strerror(errno));
+        fflush(stdout);
         return 1;
     }
 
     if (chdir("/") == -1) {
-        perror("chdir /");
+        printf("chdir / error: %s\n", strerror(errno));
+        fflush(stdout);
         return 1;
     }
     printf("Zaping old root\n");
-    // delete the old root
-    rrm(parent);
-
+    fflush(stdout);
+    // TODO: delete the old root
+    //rrm(parent);
+    close(parent);
     printf("Restoring stdout / stderr and hand over to new init\n");
+    fflush(stdout);
     // restore stdout and stderr
     dup2(stdout_fd, 1);
     dup2(stderr_fd, 2);
@@ -134,43 +166,70 @@ int main(int argc, char *argv[]) {
     // exec next init
     char *argv2[] = {"/sbin/init", NULL};
     if (execv("/sbin/init", argv2) == -1) {
-        perror("execv /sbin/init");
+        printf("execv /sbin/init: %s\n", strerror(errno));
+        fflush(stdout);
         return 1;
     }
     argv2[0] = "/init";
     if (execv("/init", argv2) == -1) {
-        perror("execv /init");
+        printf("execv /init: %s\n", strerror(errno));
+        fflush(stdout);
         return 1;
     }
     fprintf(stderr, "No init found\n");
+    return 1;
 }
 
+// FIXME: this is not working
 void rrm(int src) {
     struct dirent *de;
     DIR *dr = fdopendir(src);
     if (dr == NULL) {
-        perror("fdopendir");
+        printf("fdopendir: %s\n", strerror(errno));
+        fflush(stdout);
         return;
     }
-    while ((de = readdir(dr)) != NULL) {
+    while (1) {
+        de = readdir(dr);
+        if (de == NULL) {
+            printf("readdir: %s\n", strerror(errno));
+            fflush(stdout);
+            break;
+        }
         if (de->d_type == DT_DIR) {
-            int fd = openat(src, de->d_name, O_DIRECTORY | O_RDWR);
+            int isdot = strcmp(de->d_name, ".") == 0;
+            int isdotdot = strcmp(de->d_name, "..") == 0;
+            if (isdot || isdotdot) {
+                printf("Skipping %s\n", de->d_name);
+                fflush(stdout);
+                continue;
+            }
+            printf("Recursing into %s %d %d\n", de->d_name, strcmp(de->d_name, "."), strcmp(de->d_name, ".."));
+            fflush(stdout);
+            int fd = openat(src, de->d_name, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
             if (fd == -1) {
-                perror("openat");
+                printf("openat %s: %s\n", de->d_name, strerror(errno));
+                fflush(stdout);
                 continue; // continue with the next file, should be returning
             }
+            printf("Deleting subdir %s\n", de->d_name);
             rrm(fd);
             close(fd);
         } else {
+            printf("Deleting %s\n", de->d_name);
+            fflush(stdout);
             if (unlinkat(src, de->d_name, 0) != 0) {
-                perror("unlinkat");
+                printf("unlinkat %s: %s\n", de->d_name, strerror(errno));
+                fflush(stdout);
                 continue; // continue with the next file, should be returning
             }
         }
     }
+    printf("Deleting directory\n");
     closedir(dr);
     if (unlinkat(src, "", AT_REMOVEDIR) != 0) {
-        perror("unlinkat");
+        printf("unlinkat %s: %s\n", de->d_name, strerror(errno));
+        fflush(stdout);
         return;
     }
 }
@@ -180,17 +239,19 @@ char *find_squasfs() {
     struct dirent *de;
     DIR *dr = opendir("/");
     if (dr == NULL) {
-        perror("opendir");
+        printf("opendir /: %s\n", strerror(errno));
+        fflush(stdout);
         return NULL;
     }
     while ((de = readdir(dr)) != NULL) {
         if (de->d_type == DT_REG) {
             FILE *f = fopen(de->d_name, "r");
             if (f == NULL) {
-                perror("fopen");
+                printf("fopen %s: %s", de->d_name, strerror(errno));
                 return NULL;
             }
             printf("Testing %s for squashfs magic\n", de->d_name);
+            fflush(stdout);
             int magic;
             fread(&magic, sizeof(magic), 1, f);
             fclose(f);
@@ -212,27 +273,38 @@ int mkdirp(const char *path) {
 }
 
 // setup a loop device and attach a file to it
-void setup_loop(const char *file, int n) {
+int setup_loop(const char *file) {
     int fd = open("/dev/loop-control", O_RDWR);
     if (fd == -1) {
-        printf("open /dev/loop-control: %s", strerror(errno));
-        return;
+        printf("open /dev/loop-control: %s\n", strerror(errno));
+        fflush(stdout);
+        return -1;
     }
-    int loop = ioctl(fd, LOOP_CTL_ADD, n);
+    int loop = ioctl(fd, LOOP_CTL_GET_FREE);
     if (loop == -1) {
-        printf("ioctl LOOP_CTL_ADD: %s", strerror(errno));
-        return;
+        printf("ioctl LOOP_CTL_GET_FREE: %s\n", strerror(errno));
+        fflush(stdout);
+        return -1;
     }
     close(fd);
+
     char loop_device[20];
-    snprintf(loop_device, 20, "/dev/loop%d", n);
+    snprintf(loop_device, 20, "/dev/loop%d", loop);
+
     fd = open(loop_device, O_RDWR);
     if (fd == -1) {
-        printf("open loop device %s", strerror(errno));
-        return;
+        printf("open loop device %s\n", strerror(errno));
+        fflush(stdout);
+        return -1;
     }
-    if (ioctl(fd, LOOP_SET_FD, file) == -1) {
-        printf("ioctl LOOP_SET_FD: %s", strerror(errno));
-        return;
+
+    int filefd = open(file, O_RDWR);
+
+    if (ioctl(fd, LOOP_SET_FD, filefd) == -1) {
+        printf("ioctl LOOP_SET_FD: %s\n", strerror(errno));
+        fflush(stdout);
+        return -1;
     }
+    close(filefd);
+    return loop;
 }
