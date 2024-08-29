@@ -58,10 +58,26 @@ int main(int argc, char *argv[]) {
         fflush(stdout);
         return 1;
     }
+    // create /dev/pts
+    if (mkdirp("/dev/shm") == -1) {
+        printf("mkdir /dev/shm: %s\n", strerror(errno));
+        fflush(stdout);
+        return 1;
+    }
 
     // mount pseudo filesystems
     if (mount("pts", "/dev/pts", "devpts", 0, NULL) != 0) {
         printf("mount /dev/pts: %s\n", strerror(errno));
+        fflush(stdout);
+        return 1;
+    }
+    if (mount("tmpfs", "/dev/shm", "tmpfs", 0, NULL) != 0) {
+        printf("mount /dev/shm: %s\n", strerror(errno));
+        fflush(stdout);
+        return 1;
+    }
+    if (mount("tmpfs", "/tmp", "tmpfs", 0, NULL) != 0) {
+        printf("mount /dev/shm: %s\n", strerror(errno));
         fflush(stdout);
         return 1;
     }
@@ -75,6 +91,17 @@ int main(int argc, char *argv[]) {
         fflush(stdout);
         return 1;
     }
+    if (mount("cgroup2", "/sys/fs/cgroup", "cgroup2", 0, NULL) != 0) {
+        printf("mount /sys: %s\n", strerror(errno));
+        fflush(stdout);
+        return 1;
+    }
+    if (mount("configfs", "/sys/kernel/config", "configfs", 0, NULL) != 0) {
+        printf("mount /sys: %s\n", strerror(errno));
+        fflush(stdout);
+        return 1;
+    }
+
 
     printf("Locating squashfs rootfs\n");
     fflush(stdout);
@@ -121,6 +148,11 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     if (mount("/sys", "/newroot/sys", NULL, MS_MOVE, NULL) != 0) {
+        printf("move mount /sys: %s", strerror(errno));
+        fflush(stdout);
+        return 1;
+    }
+    if (mount("/tmp", "/newroot/tmp", NULL, MS_MOVE, NULL) != 0) {
         printf("move mount /sys: %s", strerror(errno));
         fflush(stdout);
         return 1;
