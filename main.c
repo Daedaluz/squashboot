@@ -8,18 +8,21 @@
 #include <sys/ioctl.h>
 #include <linux/loop.h>
 #include <malloc.h>
+#include <errno.h>
 
 const int squashfs_magic = 0x73717368;
 
 int mkdirp(const char *path);
+
 void rrm(int src);
+
 char *find_squasfs();
-int setup_loop(const char *file, int n);
+
+void setup_loop(const char *file, int n);
 
 int main(int argc, char *argv[]) {
-    printf("Hello Init World\n!");
     // First things first, we need a device tree
-    if (mount("none", "/dev", "devtmpfs", 0, NULL) != 0) {
+    if (mount("devtmpfs", "/dev", "devtmpfs", 0, NULL) != 0) {
         perror("mount /dev");
         return 1;
     }
@@ -46,15 +49,15 @@ int main(int argc, char *argv[]) {
     }
 
     // mount pseudo filesystems
-    if (mount("none", "/dev/pts", "devpts", 0, NULL) != 0) {
+    if (mount("pts", "/dev/pts", "devpts", 0, NULL) != 0) {
         perror("mount /dev/pts");
         return 1;
     }
-    if (mount("none", "/proc", "proc", 0, NULL) != 0) {
+    if (mount("proc", "/proc", "proc", 0, NULL) != 0) {
         perror("mount /proc");
         return 1;
     }
-    if (mount("none", "/sys", "sysfs", 0, NULL) != 0) {
+    if (mount("sysfs", "/sys", "sysfs", 0, NULL) != 0) {
         perror("mount /sys");
         return 1;
     }
@@ -209,28 +212,27 @@ int mkdirp(const char *path) {
 }
 
 // setup a loop device and attach a file to it
-int setup_loop(const char *file, int n) {
+void setup_loop(const char *file, int n) {
     int fd = open("/dev/loop-control", O_RDWR);
     if (fd == -1) {
-        perror("open /dev/loop-control");
-        return -1;
+        printf("open /dev/loop-control: %s", strerror(errno));
+        return;
     }
     int loop = ioctl(fd, LOOP_CTL_ADD, n);
     if (loop == -1) {
-        perror("ioctl LOOP_CTL_ADD");
-        return -1;
+        printf("ioctl LOOP_CTL_ADD: %s", strerror(errno));
+        return;
     }
     close(fd);
     char loop_device[20];
-    sprintf(loop_device, "/dev/loop%d", n);
+    snprintf(loop_device, 20, "/dev/loop%d", n);
     fd = open(loop_device, O_RDWR);
     if (fd == -1) {
-        perror("open loop device");
-        return -1;
+        printf("open loop device %s", strerror(errno));
+        return;
     }
     if (ioctl(fd, LOOP_SET_FD, file) == -1) {
-        perror("ioctl LOOP_SET_FD");
-        return -1;
+        printf("ioctl LOOP_SET_FD: %s", strerror(errno));
+        return;
     }
-    return fd;
 }
