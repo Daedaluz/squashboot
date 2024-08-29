@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <linux/loop.h>
+#include <malloc.h>
 
 const int squashfs_magic = 0x73717368;
 
@@ -35,6 +36,8 @@ int main(int argc, char *argv[]) {
     dup2(fd, 1);
     close(fd);
 
+    printf("Mounting pseudo filesystems\n");
+
     // create /dev/pts
     if (mkdirp("/dev/pts") == -1) {
         perror("mkdir /dev/pts");
@@ -55,6 +58,8 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    printf("Locating squashfs rootfs\n");
+
     // find the squashfs filesystem and mount it
     char *squashfs = find_squasfs();
     if (squashfs == NULL) {
@@ -62,16 +67,21 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    printf("Found squashfs at %s\n", squashfs);
+    printf("Attaching %s to /dev/loop0\n", squashfs);
     // setup a loop device and attach the squashfs filesystem to it
     if (setup_loop(squashfs, 0) == -1) {
         return 1;
     }
+    free(squashfs);
 
+    printf("Mounting /dev/loop0 to /newroot\n");
     if (mount("/dev/loop0", "/newroot", "squashfs", MS_RDONLY | MS_I_VERSION, NULL) != 0) {
         perror("mount squashfs to new root");
         return 1;
     }
 
+    printf("Moving pseudo filesystems to new root");
     // move the pseudo filesystems to the new root
     if (mount("/dev", "/newroot/dev", NULL, MS_MOVE, NULL) != 0) {
         perror("move mount /dev");
@@ -88,6 +98,7 @@ int main(int argc, char *argv[]) {
 
     // chroot to the new root while retaining a reference to the old root
     // so that we can delete the remnants of the old root and free up RAM
+    printf("Entering new root\n");
     if (chdir("/newroot") == -1) {
         perror("chdir /newroot");
         return 1;
@@ -107,9 +118,11 @@ int main(int argc, char *argv[]) {
         perror("chdir /");
         return 1;
     }
+    printf("Zaping old root\n");
     // delete the old root
     rrm(parent);
 
+    printf("Restoring stdout / stderr and hand over to new init\n");
     // restore stdout and stderr
     dup2(stdout_fd, 1);
     dup2(stderr_fd, 2);
@@ -173,6 +186,7 @@ char *find_squasfs() {
                 perror("fopen");
                 return NULL;
             }
+            printf("Testing %s for squashfs magic\n", de->d_name);
             int magic;
             fread(&magic, sizeof(magic), 1, f);
             fclose(f);
