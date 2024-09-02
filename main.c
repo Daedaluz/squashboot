@@ -177,7 +177,7 @@ int main(int argc, char *argv[]) {
     move_mount("/tmp", "/newroot/tmp");
     move_mount("/run", "/newroot/run");
 
-    mount("/", "/newroot/mnt", NULL, MS_BIND, NULL);
+    //mount("/", "/newroot/mnt", NULL, MS_BIND, NULL);
 
     // chroot to the new root while retaining a reference to the old root
     // so that we can delete the remnants of the old root and free up RAM
@@ -185,6 +185,7 @@ int main(int argc, char *argv[]) {
     assert("chdir to /newroot", chdir("/newroot") != 0);
     int parent = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     assert("open /", parent == -1);
+    move_mount("/newroot", "/");
     assert("chroot to \".\"", chroot(".") != 0);
     assert("chdir \"/\"", chdir("/") != 0);
 
