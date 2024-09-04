@@ -9,115 +9,30 @@
 #include <linux/loop.h>
 #include <errno.h>
 #include <stdlib.h>
-#include <ftw.h>
-#include "util.h"
-
-const char *get_fd_type(int fd) {
-    struct stat statbuf;
-
-    // Perform fstat on the file descriptor
-    if (fstat(fd, &statbuf) == -1) {
-        perror("fstat");
-        return "Unknown (Error)";
-    }
-
-    // Determine the file type
-    if (S_ISREG(statbuf.st_mode)) {
-        return "Regular File";
-    } else if (S_ISDIR(statbuf.st_mode)) {
-        return "Directory";
-    } else if (S_ISCHR(statbuf.st_mode)) {
-        return "Character Device";
-    } else if (S_ISBLK(statbuf.st_mode)) {
-        return "Block Device";
-    } else if (S_ISFIFO(statbuf.st_mode)) {
-        return "FIFO (Named Pipe)";
-    } else if (S_ISSOCK(statbuf.st_mode)) {
-        return "Socket";
-    } else if (S_ISLNK(statbuf.st_mode)) {
-        return "Symbolic Link";
-    } else {
-        return "Unknown";
-    }
-}
-
-char found_path[255];
-int target_inode;
+#include <stdarg.h>
 
 int stdout_fd;
 int stderr_fd;
 
-// Callback function for ftw
-int find_by_inode(const char *fpath, const struct stat *sb, int typeflag) {
-    if (sb->st_ino < 10) {
-        char buff[255];
-        int n = snprintf(buff, 255, "%s: %lu\n", fpath, sb->st_ino);
-        write(stdout_fd, buff, n);
-    }
-    if (sb->st_ino == target_inode) {
-        strncpy(found_path, fpath, 255 - 1);
-        found_path[255 - 1] = '\0';  // Ensure null-termination
-        return 1; // Stop the search
-    }
-    return 0; // Continue search
-}
-
-// Function to locate a file by inode number
-const char *locate_file_by_inode(const char *start_dir, ino_t inode) {
-    target_inode = inode;
-    found_path[0] = '\0';  // Clear previous results
-
-    ftw(start_dir, find_by_inode, FTW_D | FTW_F | FTW_DNR | FTW_NS | FTW_SL);
-    return found_path[0] != '\0' ? found_path : NULL;
-}
-
 const int squashfs_magic = 0x73717368;
 
-int mkdirp(const char *path);
+static int mkdirp(const char *path);
 
-void rrm(int src);
+static char *find_squasfs();
 
-char *find_squasfs();
+static int setup_loop(const char *file);
 
-int setup_loop(const char *file);
+static int recursiveRemove(int fd);
 
-void handler(int sig) {
-    klog("cought signal %s(%d)", strsignal(sig), sig);
-    exit(-1);
-}
+static void mount_pseudofs(const char *src, const char *target, const char *fs);
 
-void mount_pseudofs(const char *src, const char *target, const char *fs) {
-    char msg[25];
-    snprintf(msg, 25, "mount %s", src);
-    assert(msg, mount(src, target, fs, 0, NULL) != 0);
-}
+static void move_mount(const char *src, const char *dst);
 
-void move_mount(const char *src, const char *dst) {
-    char msg[100];
-    snprintf(msg, 100, "move mount %s to %s", src, dst);
-    assert(msg, mount(src, dst, NULL, MS_MOVE, NULL) != 0);
-}
+static void mountfs(const char *src, const char *dst, const char *fs);
 
-void mountfs(const char *src, const char *dst, const char *fs) {
-    char msg[100];
-    snprintf(msg, 100, "mounting %s on %s", src, dst);
-    assert(msg, mount(src, dst, fs, MS_RDONLY | MS_I_VERSION, NULL) != 0);
-}
+void klog(const char *fmt, ...);
 
-void set_printk_ratelimit(int burst, int n) {
-    int burstfd = open("/proc/sys/kernel/printk_ratelimit_burst", O_RDWR);
-    int ratefd = open("/proc/sys/kernel/printk_ratelimit", O_RDWR);
-    assert("unable to open /proc/sys/kernel/printk_ratelimit_burst", burstfd == -1);
-    assert("unable to open /proc/sys/kernel/printk_ratelimit", ratefd == -1);
-    char buff[10];
-    snprintf(buff, 10, "%d\n", burst);
-    write(burstfd, buff, strlen(buff));
-    snprintf(buff, 10, "%d\n", n);
-    write(burstfd, buff, strlen(buff));
-    write(ratefd, "50\n", 3);
-    close(burstfd);
-    close(ratefd);
-}
+void assert(const char *prefix, int b, ...);
 
 int main(int argc, char *argv[]) {
     // First things first, we need a device tree
@@ -150,8 +65,6 @@ int main(int argc, char *argv[]) {
     mount_pseudofs("cgroup2", "/sys/fs/cgroup", "cgroup2");
     mount_pseudofs("configfs", "/sys/kernel/config", "configfs");
 
-    set_printk_ratelimit(50, 50);
-
     // find the squashfs filesystem and mount it
     char *squashfs = find_squasfs();
     assert("No squashfs filesystem found", squashfs == NULL);
@@ -163,8 +76,8 @@ int main(int argc, char *argv[]) {
     int dev = setup_loop(squashfs);
     free(squashfs);
 
-    char loopdev[20];
-    snprintf(loopdev, 20, "/dev/loop%d", dev);
+    char loopdev[15];
+    snprintf(loopdev, 15, "/dev/loop%d", dev);
 
     klog("Mounting %s to /newroot", loopdev);
     mountfs(loopdev, "/newroot", "squashfs");
@@ -177,8 +90,6 @@ int main(int argc, char *argv[]) {
     move_mount("/tmp", "/newroot/tmp");
     move_mount("/run", "/newroot/run");
 
-    //mount("/", "/newroot/mnt", NULL, MS_BIND, NULL);
-
     // chroot to the new root while retaining a reference to the old root
     // so that we can delete the remnants of the old root and free up RAM
     klog("Entering new root");
@@ -189,17 +100,16 @@ int main(int argc, char *argv[]) {
     assert("chroot to \".\"", chroot(".") != 0);
     assert("chdir \"/\"", chdir("/") != 0);
 
-    // TODO: delete the old root
     klog("Zapping old root");
-    //rrm(parent);
-    close(parent);
+    recursiveRemove(parent);
 
     // restore stdout and stderr
     dup2(stdout_fd, 1);
     dup2(stderr_fd, 2);
 
     // shellinit
-    if (access("/init.sh", F_OK) == 0) {
+    if (access("/init.sh", F_OK) == 0 &&
+        access("/sbin/getty", F_OK) == 0) {
         char *args[] = {
                 "/sbin/getty",
                 "-l",
@@ -212,7 +122,8 @@ int main(int argc, char *argv[]) {
         if (execv("/sbin/getty", args) == -1) {
             klog("exec /init.sh: %s", strerror(errno));
         }
-    };
+    }
+
     // exec next init
     char *argv2[] = {"/init", NULL};
     if (execv("/init", argv2) == -1) {
@@ -224,51 +135,6 @@ int main(int argc, char *argv[]) {
     }
     klog("No init found");
     return 1;
-}
-
-// FIXME: this is not working
-void rrm(int src) {
-    struct dirent *de;
-    DIR *dr = fdopendir(src);
-    if (dr == NULL) {
-        klog("fdopendir: %s\n", strerror(errno));
-        return;
-    }
-    while (1) {
-        de = readdir(dr);
-        if (de == NULL) {
-            klog("readdir: %s\n", strerror(errno));
-            break;
-        }
-        if (de->d_type == DT_DIR) {
-            int isdot = strcmp(de->d_name, ".") == 0;
-            int isdotdot = strcmp(de->d_name, "..") == 0;
-            if (isdot || isdotdot) {
-                klog("Skipping %s\n", de->d_name);
-                continue;
-            }
-            klog("Recursing into %s %d %d\n", de->d_name, strcmp(de->d_name, "."), strcmp(de->d_name, ".."));
-            int fd = openat(src, de->d_name, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-            if (fd == -1) {
-                klog("openat %s: %s\n", de->d_name, strerror(errno));
-                continue; // continue with the next file, should be returning
-            }
-            klog("Deleting subdir %s\n", de->d_name);
-            close(fd);
-        } else {
-            klog("Deleting %s\n", de->d_name);
-            if (unlinkat(src, de->d_name, 0) != 0) {
-                klog("unlinkat %s: %s\n", de->d_name, strerror(errno));
-                continue; // continue with the next file, should be returning
-            }
-        }
-    }
-    klog("Deleting directory\n");
-    closedir(dr);
-    if (unlinkat(src, "", AT_REMOVEDIR) != 0) {
-        klog("unlinkat %s: %s\n", de->d_name, strerror(errno));
-        return;
-    }
 }
 
 // find_squashfs finds the first squashfs filesystem in / and returns the path to it
@@ -320,4 +186,117 @@ int setup_loop(const char *file) {
     close(filefd);
     close(fd);
     return loop;
+}
+
+/* remove all files/directories below dirName -- don't cross mountpoints */
+static int recursiveRemove(int fd) {
+    struct stat rb;
+    DIR *dir;
+    int rc = -1;
+    int dfd;
+
+    if (!(dir = fdopendir(fd))) {
+        klog("failed to open directory");
+        goto done;
+    }
+
+    /* fdopendir() precludes us from continuing to use the input fd */
+    dfd = dirfd(dir);
+    if (fstat(dfd, &rb)) {
+        klog("stat failed");
+        goto done;
+    }
+
+    while (1) {
+        struct dirent *d;
+        int isdir = 0;
+
+        errno = 0;
+        if (!(d = readdir(dir))) {
+            if (errno) {
+                klog("failed to read directory");
+                goto done;
+            }
+            break;    /* end of directory */
+        }
+
+        if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, ".."))
+            continue;
+#ifdef _DIRENT_HAVE_D_TYPE
+        if (d->d_type == DT_DIR || d->d_type == DT_UNKNOWN)
+#endif
+        {
+            struct stat sb;
+
+            if (fstatat(dfd, d->d_name, &sb, AT_SYMLINK_NOFOLLOW)) {
+                klog("stat of %s failed", d->d_name);
+                continue;
+            }
+
+            /* skip if device is not the same */
+            if (sb.st_dev != rb.st_dev)
+                continue;
+
+            /* remove subdirectories */
+            if (S_ISDIR(sb.st_mode)) {
+                int cfd;
+
+                cfd = openat(dfd, d->d_name, O_RDONLY);
+                if (cfd >= 0)
+                    recursiveRemove(cfd);    /* it closes cfd too */
+                isdir = 1;
+            }
+        }
+
+        if (unlinkat(dfd, d->d_name, isdir ? AT_REMOVEDIR : 0))
+            klog("failed to unlink %s", d->d_name);
+    }
+
+    rc = 0;    /* success */
+    done:
+    if (dir)
+        closedir(dir);
+    else
+        close(fd);
+    return rc;
+}
+
+
+static void mount_pseudofs(const char *src, const char *target, const char *fs) {
+    char msg[25];
+    snprintf(msg, 25, "mount %s", src);
+    assert(msg, mount(src, target, fs, 0, NULL) != 0);
+}
+
+static void move_mount(const char *src, const char *dst) {
+    char msg[100];
+    snprintf(msg, 100, "move mount %s to %s", src, dst);
+    assert(msg, mount(src, dst, NULL, MS_MOVE, NULL) != 0);
+}
+
+static void mountfs(const char *src, const char *dst, const char *fs) {
+    char msg[100];
+    snprintf(msg, 100, "mounting %s on %s", src, dst);
+    assert(msg, mount(src, dst, fs, MS_RDONLY | MS_I_VERSION, NULL) != 0);
+}
+
+void klog(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vprintf(fmt, ap);
+    va_end(ap);
+    printf("\n");
+    fflush(stdout);
+}
+
+void assert(const char *prefix, int b, ...) {
+    if (b) {
+        va_list ap;
+        va_start(ap, b);
+        vprintf(prefix, ap);
+        va_end(ap);
+        printf(": %s\n", strerror(errno));
+        fflush(stdout);
+        exit(-1);
+    }
 }
