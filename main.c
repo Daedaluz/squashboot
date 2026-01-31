@@ -71,9 +71,6 @@ int main(int argc, char *argv[]) {
     mount_pseudofs("tmpfs", "/run", "tmpfs");
     mount_pseudofs("proc", "/proc", "proc");
     mount_pseudofs("sysfs", "/sys", "sysfs");
-
-    assert("mkdir /sys/fs/cgroup", mkdirp("/sys/fs/cgroup") == -1);
-    assert("mkdir /sys/kernel/config", mkdirp("/sys/kernel/config") == -1);
     mount_pseudofs("cgroup2", "/sys/fs/cgroup", "cgroup2");
     mount_pseudofs("configfs", "/sys/kernel/config", "configfs");
 
