@@ -34,6 +34,8 @@ static void klog(const char *fmt, ...);
 
 static void assert(const char *prefix, int b, ...);
 
+static void print_filesystems(void);
+
 int main(int argc, char *argv[]) {
     // First things first, we need a device tree
     mkdirp("/dev");
@@ -71,6 +73,9 @@ int main(int argc, char *argv[]) {
     mount_pseudofs("tmpfs", "/run", "tmpfs");
     mount_pseudofs("proc", "/proc", "proc");
     mount_pseudofs("sysfs", "/sys", "sysfs");
+
+    print_filesystems();
+
     mount_pseudofs("cgroup2", "/sys/fs/cgroup", "cgroup2");
     mount_pseudofs("configfs", "/sys/kernel/config", "configfs");
 
@@ -311,4 +316,20 @@ static void assert(const char *prefix, int b, ...) {
         fflush(stdout);
         exit(-1);
     }
+}
+
+static void print_filesystems(void) {
+    FILE *f = fopen("/proc/filesystems", "r");
+    if (!f) {
+        klog("Could not read /proc/filesystems");
+        return;
+    }
+    klog("Available filesystems:");
+    char line[64];
+    while (fgets(line, sizeof(line), f)) {
+        // Remove trailing newline
+        line[strcspn(line, "\n")] = 0;
+        klog("  %s", line);
+    }
+    fclose(f);
 }
