@@ -39,6 +39,12 @@ int main(int argc, char *argv[]) {
     mkdirp("/dev");
     mount_pseudofs("devtmpfs", "/dev/", "devtmpfs");
 
+    // create standard directories
+    mkdirp("/run");
+    mkdirp("/tmp");
+    mkdirp("/proc");
+    mkdirp("/sys");
+    
     // Setup logging
     int fd = open("/dev/kmsg", O_WRONLY | O_NOCTTY | O_CLOEXEC);
     assert("open /dev/kmsg", fd == -1);
