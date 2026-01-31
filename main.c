@@ -70,7 +70,9 @@ int main(int argc, char *argv[]) {
     mount_pseudofs("proc", "/proc", "proc");
     mount_pseudofs("sysfs", "/sys", "sysfs");
 
+    mkdirp("/sys/fs/");
     mkdirp("/sys/fs/cgroup");
+    mkdirp("/sys/kernel");
     mkdirp("/sys/kernel/config");
 
     mount_pseudofs("cgroup2", "/sys/fs/cgroup", "cgroup2");
