@@ -26,16 +26,17 @@ static int recursiveRemove(int fd);
 
 static void mount_pseudofs(const char *src, const char *target, const char *fs);
 
-static void move_mount(const char *src, const char *dst);
+static void relocate_mount(const char *src, const char *dst);
 
 static void mountfs(const char *src, const char *dst, const char *fs);
 
-void klog(const char *fmt, ...);
+static void klog(const char *fmt, ...);
 
-void assert(const char *prefix, int b, ...);
+static void assert(const char *prefix, int b, ...);
 
 int main(int argc, char *argv[]) {
     // First things first, we need a device tree
+    mkdirp("/dev");
     mount_pseudofs("devtmpfs", "/dev/", "devtmpfs");
 
     // Setup logging
@@ -84,11 +85,11 @@ int main(int argc, char *argv[]) {
 
     // move the pseudo filesystems to the new root
     klog("Moving pseudo filesystems to new root");
-    move_mount("/dev", "/newroot/dev");
-    move_mount("/proc", "/newroot/proc");
-    move_mount("/sys", "/newroot/sys");
-    move_mount("/tmp", "/newroot/tmp");
-    move_mount("/run", "/newroot/run");
+    relocate_mount("/dev", "/newroot/dev");
+    relocate_mount("/proc", "/newroot/proc");
+    relocate_mount("/sys", "/newroot/sys");
+    relocate_mount("/tmp", "/newroot/tmp");
+    relocate_mount("/run", "/newroot/run");
 
     // chroot to the new root while retaining a reference to the old root
     // so that we can delete the remnants of the old root and free up RAM
@@ -96,7 +97,7 @@ int main(int argc, char *argv[]) {
     assert("chdir to /newroot", chdir("/newroot") != 0);
     int parent = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     assert("open /", parent == -1);
-    move_mount("/newroot", "/");
+    relocate_mount("/newroot", "/");
     assert("chroot to \".\"", chroot(".") != 0);
     assert("chdir \"/\"", chdir("/") != 0);
 
@@ -147,8 +148,11 @@ char *find_squasfs() {
             klog("Testing %s for squashfs magic", de->d_name);
             FILE *f = fopen(de->d_name, "r");
             assert("fopen %s", f == NULL, de->d_name);
-            int magic;
-            fread(&magic, sizeof(magic), 1, f);
+            int magic = 0;
+            if (fread(&magic, sizeof(magic), 1, f) != 1) {
+                fclose(f);
+                continue;
+            }
             fclose(f);
             if (magic == squashfs_magic) {
                 return strdup(de->d_name);
@@ -268,7 +272,7 @@ static void mount_pseudofs(const char *src, const char *target, const char *fs) 
     assert(msg, mount(src, target, fs, 0, NULL) != 0);
 }
 
-static void move_mount(const char *src, const char *dst) {
+static void relocate_mount(const char *src, const char *dst) {
     char msg[100];
     snprintf(msg, 100, "move mount %s to %s", src, dst);
     assert(msg, mount(src, dst, NULL, MS_MOVE, NULL) != 0);
@@ -280,7 +284,7 @@ static void mountfs(const char *src, const char *dst, const char *fs) {
     assert(msg, mount(src, dst, fs, MS_RDONLY | MS_I_VERSION, NULL) != 0);
 }
 
-void klog(const char *fmt, ...) {
+static void klog(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     vprintf(fmt, ap);
@@ -289,7 +293,7 @@ void klog(const char *fmt, ...) {
     fflush(stdout);
 }
 
-void assert(const char *prefix, int b, ...) {
+static void assert(const char *prefix, int b, ...) {
     if (b) {
         va_list ap;
         va_start(ap, b);
