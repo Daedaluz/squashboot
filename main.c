@@ -267,8 +267,8 @@ static int recursiveRemove(int fd) {
 
 
 static void mount_pseudofs(const char *src, const char *target, const char *fs) {
-    char msg[25];
-    snprintf(msg, 25, "mount %s", src);
+    char msg[100];
+    snprintf(msg, 100, "mount src(%s) to target(%s) with fs(%s)", src, target, fs);
     assert(msg, mount(src, target, fs, 0, NULL) != 0);
 }
 
