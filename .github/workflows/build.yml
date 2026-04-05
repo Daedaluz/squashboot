@@ -7,9 +7,6 @@ on:
   pull_request:
     branches: ["master"]
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -22,12 +19,12 @@ jobs:
             platform: linux/arm64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Build in Alpine (musl)
         run: |
@@ -41,7 +38,7 @@ jobs:
                    cp /tmp/build/squashboot /src/squashboot-linux-${{ matrix.arch }}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: squashboot-linux-${{ matrix.arch }}
           path: squashboot-linux-${{ matrix.arch }}
@@ -54,12 +51,12 @@ jobs:
       contents: write
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           merge-multiple: true
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.6.1
         with:
           files: |
             squashboot-linux-amd64
