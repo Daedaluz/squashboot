@@ -1,0 +1,63 @@
+name: Build
+
+on:
+  push:
+    branches: ["master"]
+    tags: ["v*"]
+  pull_request:
+    branches: ["master"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build in Alpine (musl)
+        run: |
+          docker run --rm --platform "${{ matrix.platform }}" \
+            -v "${{ github.workspace }}:/src" \
+            alpine:latest \
+            sh -c "apk add --no-cache cmake build-base git && \
+                   git config --global --add safe.directory /src && \
+                   cmake -S /src -B /tmp/build && \
+                   cmake --build /tmp/build && \
+                   cp /tmp/build/squashboot /src/squashboot-linux-${{ matrix.arch }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: squashboot-linux-${{ matrix.arch }}
+          path: squashboot-linux-${{ matrix.arch }}
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            squashboot-linux-amd64
+            squashboot-linux-arm64
