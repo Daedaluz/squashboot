@@ -66,15 +66,16 @@ int main(int argc, char *argv[]) {
     assert("mkdir /dev/pts", mkdirp("/dev/pts") == -1);
     assert("mkdir /dev/shm", mkdirp("/dev/shm") == -1);
 
+
+    
     // mount pseudo filesystems
+    mount_pseudofs("proc", "/proc", "proc");
+    print_filesystems();
     mount_pseudofs("pts", "/dev/pts", "devpts");
     mount_pseudofs("tmpfs", "/dev/shm", "tmpfs");
     mount_pseudofs("tmpfs", "/tmp", "tmpfs");
     mount_pseudofs("tmpfs", "/run", "tmpfs");
-    mount_pseudofs("proc", "/proc", "proc");
     mount_pseudofs("sysfs", "/sys", "sysfs");
-
-    print_filesystems();
 
     mount_pseudofs("cgroup2", "/sys/fs/cgroup", "cgroup2");
     mount_pseudofs("configfs", "/sys/kernel/config", "configfs");
@@ -307,14 +308,17 @@ static void klog(const char *fmt, ...) {
 }
 
 static void assert(const char *prefix, int b, ...) {
+    va_list ap;
+    va_start(ap, b);
+    vprintf(prefix, ap);
+    va_end(ap);
     if (b) {
-        va_list ap;
-        va_start(ap, b);
-        vprintf(prefix, ap);
-        va_end(ap);
         printf(": %s\n", strerror(errno));
         fflush(stdout);
         exit(-1);
+    } else {
+        printf(": OK!\n");
+        fflush(stdout);
     }
 }
 
