@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.22)
 project(squashboot C)
 
 set(CMAKE_C_STANDARD 11)
-link_libraries("-static")
+
+set(NOLIBC_DIR ${CMAKE_SOURCE_DIR}/third_party/nolibc)
 
 # Get git version information
 execute_process(
@@ -29,7 +30,31 @@ endif()
 
 add_executable(squashboot
         main.c
+        sys.c
+        dir.c
 )
+
+target_include_directories(squashboot PRIVATE ${NOLIBC_DIR})
+
+# No libc: freestanding build against vendored nolibc (third_party/nolibc).
+# -static is implied since there is nothing dynamic left to link against.
+target_compile_options(squashboot PRIVATE
+    -nostdlib
+    -ffreestanding
+    -fno-stack-protector
+    -fno-asynchronous-unwind-tables
+    -fno-ident
+)
+
+target_link_options(squashboot PRIVATE
+    -nostdlib
+    -static
+    -no-pie
+)
+
+# libgcc provides compiler runtime helpers (e.g. 64-bit division on some
+# archs); it is part of the toolchain, not libc.
+target_link_libraries(squashboot PRIVATE gcc)
 
 target_compile_definitions(squashboot PRIVATE
     GIT_VERSION="${GIT_VERSION}"

@@ -1,0 +1,6 @@
+Vendored from https://github.com/torvalds/linux tools/include/nolibc
+Pinned commit: 05f7e89ab9731565d8a62e3b5d1ec206485eeb0b (Linux 6.19)
+License: LGPL-2.1 OR MIT (see individual file SPDX headers)
+
+To update: sparse-checkout tools/include/nolibc from a newer tag and
+replace this directory (excluding Makefile/.gitignore).
