@@ -60,3 +60,14 @@ target_compile_definitions(squashboot PRIVATE
     GIT_VERSION="${GIT_VERSION}"
     GIT_COMMIT="${GIT_COMMIT}"
 )
+
+# Not part of `all` — fetches from the network. Run explicitly with:
+#   cmake --build build --target update-nolibc
+# Updates to the latest stable kernel tag. To pin a specific ref instead,
+# run scripts/update-nolibc.sh <ref> directly.
+add_custom_target(update-nolibc
+    COMMAND ${CMAKE_SOURCE_DIR}/scripts/update-nolibc.sh
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Updating vendored third_party/nolibc from torvalds/linux"
+    USES_TERMINAL
+)

@@ -21,14 +21,14 @@ int fcntl(int fd, int cmd, ...) {
     nr_fcntl = __NR_fcntl;
 #endif
 
-    return __sysret(my_syscall3(nr_fcntl, fd, cmd, arg));
+    return __sysret(__nolibc_syscall3(nr_fcntl, fd, cmd, arg));
 }
 
 /*
  * int unlinkat(int dirfd, const char *path, int flags);
  */
 int unlinkat(int dirfd, const char *path, int flags) {
-    return __sysret(my_syscall3(__NR_unlinkat, dirfd, path, flags));
+    return __sysret(__nolibc_syscall3(__NR_unlinkat, dirfd, path, flags));
 }
 
 /*
