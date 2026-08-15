@@ -1,6 +1,6 @@
 # squashboot
 
-Tiny, statically linked init for initramfs.
+Tiny, statically linked, libc-free init for initramfs.
 
 It searches for the first squashfs file in the initramfs root, attaches it to
 a loop device, mounts it as the new root, relocates the pseudo-filesystems into
@@ -25,14 +25,53 @@ scripts/kconfig/merge_config.sh .config kernel.config
 | `CONFIG_DEVTMPFS` + `CONFIG_DEVTMPFS_MOUNT` | Populate `/dev` before init runs |
 | `CONFIG_PROC_FS` | `/proc` |
 | `CONFIG_SYSFS` | `/sys` |
-| `CONFIG_DEVPTS_FS` | `/dev/pts` |
+| `CONFIG_UNIX98_PTYS` | `/dev/pts` |
 | `CONFIG_CGROUPS` + `CONFIG_CGROUP_V2` | `/sys/fs/cgroup` |
 | `CONFIG_CONFIGFS_FS` | `/sys/kernel/config` |
 | `CONFIG_PRINTK` | `/dev/kmsg` early logging |
 
+## No libc
+
+squashboot links against no libc at all — not even statically. It builds
+freestanding (`-nostdlib -ffreestanding -static -no-pie`) against a vendored,
+pinned snapshot of the Linux kernel's own minimal libc replacement,
+[`tools/include/nolibc`](https://github.com/torvalds/linux/tree/master/tools/include/nolibc),
+copied into `third_party/nolibc/` (dual-licensed `LGPL-2.1 OR MIT`, safe to
+vendor outside the kernel tree). The only thing still linked in is `libgcc`,
+which supplies compiler runtime helpers and is part of the toolchain, not a
+libc.
+
+nolibc covers `_start`, raw syscalls, and a small `string.h`/`stdio.h`, but
+not everything this program needs. Two small local modules fill the gaps:
+
+- **`sys.c`/`sys.h`** — `fcntl()`, `unlinkat()`, `execv()`, implemented as
+  thin syscall wrappers using nolibc's own raw syscall primitives.
+- **`dir.c`/`dir.h`** — `sb_opendir()`/`sb_fdopendir()`/`sb_readdir()`/
+  `sb_closedir()`/`sb_dirfd()` and `struct sb_dirent` (with `d_type`), built
+  on nolibc's `getdents64()`. They're `sb_`-prefixed rather than the
+  standard names because nolibc's own `dirent.h` already defines `DIR`/
+  `struct dirent`/`opendir`/`closedir` (without `readdir()`, `dirfd()`, or
+  `d_type`), and every nolibc header pulls that in transitively — so reusing
+  the standard names would collide.
+
+### Updating vendored nolibc
+
+```sh
+cmake --build build --target update-nolibc          # latest stable kernel tag
+scripts/update-nolibc.sh v6.13                       # pin to a specific ref
+```
+
+nolibc's API is not guaranteed stable across kernel releases — e.g. its raw
+syscall macros were renamed (`my_syscallN` → `__nolibc_syscallN`) between the
+versions this project has vendored. After updating, rebuild and check
+`sys.c`/`dir.c` still compile before committing; the target only fetches, it
+doesn't verify.
+
 ## Building
 
-Requires CMake ≥ 3.22 and a C11 compiler. The binary is statically linked.
+Requires CMake ≥ 3.22 and a GCC or Clang toolchain capable of freestanding
+builds (`-nostdlib -ffreestanding`). The binary is statically linked with no
+dynamic section at all.
 
 ```sh
 cmake -B build
