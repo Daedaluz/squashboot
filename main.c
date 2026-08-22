@@ -434,13 +434,20 @@ static void mountfs(const char *src, const char *dst, const char *fs) {
     assert(msg, mount(src, dst, fs, MS_RDONLY, NULL) != 0);
 }
 
+/* /dev/kmsg turns every write() into its own timestamped record, so the
+ * whole message must go out in a single write. */
 static void klog(const char *fmt, ...) {
+    char msg[256];
     va_list ap;
     va_start(ap, fmt);
-    vprintf(fmt, ap);
+    int len = vsnprintf(msg, sizeof(msg) - 1, fmt, ap);
     va_end(ap);
-    printf("\n");
-    fflush(stdout);
+    if (len < 0)
+        return;
+    if (len > (int)sizeof(msg) - 2)
+        len = sizeof(msg) - 2;
+    msg[len] = '\n';
+    xwrite(1, msg, len + 1);
 }
 
 static void assert(const char *prefix, int b, ...) {
@@ -450,9 +457,8 @@ static void assert(const char *prefix, int b, ...) {
         va_start(ap, b);
         vsnprintf(msg, sizeof(msg), prefix, ap);
         va_end(ap);
-        printf("%s: %s\n", msg, strerror(errno));
-        fflush(stdout);
-	klog("Exit");
+        klog("%s: %s", msg, strerror(errno));
+        klog("Exit");
         exit(-1);
     }
 }
@@ -504,32 +510,28 @@ static void print_filesystems(void) {
         return;
     buf[n] = '\0';
 
-    xwrite(1, "Available filesystems:\n", 23);
+    char line[1024];
+    size_t pos = 0;
+    const char prefix[] = "Available filesystems:";
+    memcpy(line, prefix, sizeof(prefix) - 1);
+    pos = sizeof(prefix) - 1;
 
-    char line[80];
     char *p = buf;
-    char *nl;
-    while ((nl = strchr(p, '\n')) != NULL) {
-        size_t len = nl - p;
-        if (len > sizeof(line) - 3)
-            len = sizeof(line) - 3;
-        line[0] = ' ';
-        line[1] = ' ';
-        memcpy(line + 2, p, len);
-        line[2 + len] = '\n';
-        xwrite(1, line, 3 + len);
-        p = nl + 1;
+    while (p && *p) {
+        char *nl = strchr(p, '\n');
+        if (nl) *nl = '\0';
+        char *tab = strchr(p, '\t');
+        char *name = tab ? tab + 1 : p;
+        size_t len = strlen(name);
+        if (len > 0 && pos + 1 + len < sizeof(line) - 1) {
+            line[pos++] = ' ';
+            memcpy(line + pos, name, len);
+            pos += len;
+        }
+        p = nl ? nl + 1 : NULL;
     }
-    if (*p) {
-        size_t len = strlen(p);
-        if (len > sizeof(line) - 3)
-            len = sizeof(line) - 3;
-        line[0] = ' ';
-        line[1] = ' ';
-        memcpy(line + 2, p, len);
-        line[2 + len] = '\n';
-        xwrite(1, line, 3 + len);
-    }
+    line[pos++] = '\n';
+    xwrite(1, line, pos);
 }
 
 static void check_squashfs_fits(const char *dev) {
