@@ -79,5 +79,17 @@ cmake --build build
 # binary: build/squashboot
 ```
 
+### Release builds
+
+Configure with `CMAKE_BUILD_TYPE=Release` (or `MinSizeRel`). Those configs link
+with `-s`, so the binary comes out stripped; `Debug` and `RelWithDebInfo` keep
+their symbols.
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+# binary: build/squashboot, stripped
+```
+
 Pre-built static binaries for `amd64` and `arm64` are available on the
 [releases page](../../releases).

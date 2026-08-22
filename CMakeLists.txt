@@ -50,6 +50,8 @@ target_link_options(squashboot PRIVATE
     -nostdlib
     -static
     -no-pie
+    # Strip symbols in the release configs; RelWithDebInfo and Debug keep them.
+    $<$<CONFIG:Release,MinSizeRel>:-s>
 )
 
 # libgcc provides compiler runtime helpers (e.g. 64-bit division on some
@@ -71,3 +73,4 @@ add_custom_target(update-nolibc
     COMMENT "Updating vendored third_party/nolibc from torvalds/linux"
     USES_TERMINAL
 )
+
